@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Arbitrage Scanner</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #4ade80;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 1rem;
+            opacity: 0.8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .opportunities-section {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .section-title {
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            background: #10b981;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        .opportunities-list {
+            max-height: 600px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+        }
+
+        .opportunity-item {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid #4ade80;
+            transition: all 0.3s ease;
+            animation: slideInFromRight 0.5s ease-out;
+        }
+
+        @keyframes slideInFromRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .opportunity-item:hover {
+            background: rgba(255, 255, 255, 0.12);
+            transform: translateX(10px);
+        }
+
+        .profit-positive {
+            border-left-color: #10b981;
+        }
+
+        .profit-high {
+            border-left-color: #f59e0b;
+        }
+
+        .profit-very-high {
+            border-left-color: #ef4444;
+        }
+
+        .opportunity-header {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .opportunity-path {
+            font-size: 1.1rem;
+            font-weight: 600;
+            flex-grow: 1;
+        }
+
+        .profit-badge {
+            background: linear-gradient(45deg, #10b981, #059669);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+
+        .opportunity-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .detail-item {
+            text-align: center;
+        }
+
+        .detail-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #4ade80;
+        }
+
+        .detail-label {
+            font-size: 0.8rem;
+            opacity: 0.7;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2rem;
+            opacity: 0.7;
+        }
+
+        .error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .no-opportunities {
+            text-align: center;
+            padding: 40px;
+            opacity: 0.7;
+            font-size: 1.1rem;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            opacity: 0.6;
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .stat-card {
+                padding: 20px;
+            }
+
+            .opportunities-section {
+                padding: 20px;
+            }
+
+            .opportunity-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+
+            .opportunity-details {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        /* Scrollbar styling */
+        .opportunities-list::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .opportunities-list::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+        }
+
+        .opportunities-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+        }
+
+        .opportunities-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚡ Real-time Arbitrage Scanner</h1>
+            <p>High-frequency trading opportunities across cryptocurrency exchanges</p>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="total-opportunities">0</div>
+                <div class="stat-label">Total Opportunities</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="messages-processed">0</div>
+                <div class="stat-label">Messages Processed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="avg-latency">0.0μs</div>
+                <div class="stat-label">Avg Latency</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="best-profit">0.00%</div>
+                <div class="stat-label">Best Profit</div>
+            </div>
+        </div>
+
+        <div class="opportunities-section">
+            <div class="section-title">
+                <div class="status-indicator"></div>
+                Live Arbitrage Opportunities
+            </div>
+
+            <div id="opportunities-container">
+                <div class="loading">
+                    🔄 Scanning for arbitrage opportunities...
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Built with C++ & Rust | Demonstrating HFT expertise in multithreading, low-latency design, and real-time
+                data processing</p>
+        </div>
+    </div>
+
+    <script>
+        class ArbitrageDashboard {
+            constructor() {
+                this.updateInterval = 1000; // 1 second updates
+                this.maxOpportunities = 50;
+                this.isConnected = false;
+                this.stats = {
+                    totalOpportunities: 0,
+                    messagesProcessed: 0,
+                    avgLatency: 0,
+                    bestProfit: 0
+                };
+
+                this.init();
+            }
+
+            init() {
+                this.startDataPolling();
+                this.setupEventListeners();
+                console.log('🚀 Arbitrage Dashboard initialized');
+            }
+
+            startDataPolling() {
+                // Poll for new opportunities
+                setInterval(() => {
+                    this.fetchOpportunities();
+                    this.fetchStats();
+                }, this.updateInterval);
+
+                // Initial fetch
+                this.fetchOpportunities();
+                this.fetchStats();
+            }
+
+            async fetchOpportunities() {
+                try {
+                    const response = await fetch('/api/opportunities');
+                    if (!response.ok) throw new Error('Failed to fetch opportunities');
+
+                    const opportunities = await response.json();
+                    this.renderOpportunities(opportunities);
+                    this.isConnected = true;
+                } catch (error) {
+                    console.error('Error fetching opportunities:', error);
+                    this.showError('Failed to connect to arbitrage engine');
+                    this.isConnected = false;
+                }
+            }
+
+            async fetchStats() {
+                try {
+                    const response = await fetch('/api/stats');
+                    if (!response.ok) throw new Error('Failed to fetch stats');
+
+                    const stats = await response.json();
+                    this.updateStats(stats);
+                } catch (error) {
+                    console.error('Error fetching stats:', error);
+                }
+            }
+
+            renderOpportunities(opportunities) {
+                const container = document.getElementById('opportunities-container');
+
+                if (!opportunities || opportunities.length === 0) {
+                    container.innerHTML = `
+                        <div class="no-opportunities">
+                            📊 No arbitrage opportunities detected at the moment.<br>
+                            System is actively monitoring ${this.getExchangeCount()} exchanges...
+                        </div>
+                    `;
+                    return;
+                }
+
+                // Sort by profit percentage (highest first)
+                opportunities.sort((a, b) => b.profit_percentage - a.profit_percentage);
+
+                // Limit to max opportunities
+                const limitedOpportunities = opportunities.slice(0, this.maxOpportunities);
+
+                container.innerHTML = limitedOpportunities
+                    .map(opp => this.renderOpportunityItem(opp))
+                    .join('');
+            }
+
+            renderOpportunityItem(opportunity) {
+                const profitPercent = (opportunity.profit_percentage * 100);
+                const profitClass = this.getProfitClass(profitPercent);
+                const timeAgo = this.getTimeAgo(opportunity.detected_at);
+
+                return `
+                    <div class="opportunity-item ${profitClass}">
+                        <div class="opportunity-header">
+                            <div class="opportunity-path">${opportunity.path}</div>
+                            <div class="profit-badge">${profitPercent.toFixed(3)}%</div>
+                        </div>
+                        
+                        <div class="opportunity-details">
+                            <div class="detail-item">
+                                <div class="detail-value">$${opportunity.max_volume.toFixed(0)}</div>
+                                <div class="detail-label">Max Volume</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-value">${opportunity.confidence}%</div>
+                                <div class="detail-label">Confidence</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-value">${this.formatExchanges(opportunity.exchanges)}</div>
+                                <div class="detail-label">Exchanges</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-value">${timeAgo}</div>
+                                <div class="detail-label">Detected</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            updateStats(stats) {
+                document.getElementById('total-opportunities').textContent =
+                    this.formatNumber(stats.opportunities_found || 0);
+
+                document.getElementById('messages-processed').textContent =
+                    this.formatNumber(stats.messages_processed || 0);
+
+                document.getElementById('avg-latency').textContent =
+                    `${(stats.avg_latency_us || 0).toFixed(1)}μs`;
+
+                // Update best profit from current opportunities
+                const bestProfit = this.stats.bestProfit;
+                document.getElementById('best-profit').textContent =
+                    `${(bestProfit * 100).toFixed(3)}%`;
+            }
+
+            getProfitClass(profitPercent) {
+                if (profitPercent > 1.0) return 'profit-very-high';
+                if (profitPercent > 0.5) return 'profit-high';
+                return 'profit-positive';
+            }
+
+            formatNumber(num) {
+                if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+                if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+                return num.toString();
+            }
+
+            formatExchanges(exchanges) {
+                if (!exchanges || exchanges.length === 0) return 'Multi';
+                return exchanges.slice(0, 2).map(ex =>
+                    ex.charAt(0).toUpperCase() + ex.slice(1, 3)
+                ).join('+');
+            }
+
+            getTimeAgo(timestamp) {
+                // For demo purposes, show as "Just now" or seconds ago
+                if (!timestamp) return 'Just now';
+
+                const now = Date.now();
+                const diff = Math.floor((now - new Date(timestamp)) / 1000);
+
+                if (diff < 1) return 'Just now';
+                if (diff < 60) return `${diff}s ago`;
+                if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+                return `${Math.floor(diff / 3600)}h ago`;
+            }
+
+            getExchangeCount() {
+                return 3; // Binance, Coinbase, Kraken
+            }
+
+            showError(message) {
+                const container = document.getElementById('opportunities-container');
+                container.innerHTML = `
+                    <div class="error">
+                        ⚠️ ${message}<br>
+                        <small>Attempting to reconnect...</small>
+                    </div>
+                `;
+            }
+
+            setupEventListeners() {
+                // Keyboard shortcuts
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'r' && e.ctrlKey) {
+                        e.preventDefault();
+                        this.fetchOpportunities();
+                        this.fetchStats();
+                        console.log('📊 Data refreshed manually');
+                    }
+                });
+
+                // Page visibility change handling
+                document.addEventListener('visibilitychange', () => {
+                    if (!document.hidden) {
+                        // Page became visible, refresh data
+                        this.fetchOpportunities();
+                        this.fetchStats();
+                    }
+                });
+            }
+        }
+
+        // Initialize dashboard when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            window.arbitrageDashboard = new ArbitrageDashboard();
+        });
+
+        // Mock data for demonstration when API is not available
+        function generateMockOpportunities() {
+            const mockOpportunities = [
+                {
+                    path: "BTC_binance -> USDT_binance -> ETH_binance -> BTC_binance",
+                    profit_percentage: 0.0045,
+                    max_volume: 1250.0,
+                    confidence: 94,
+                    exchanges: ["binance"],
+                    detected_at: Date.now() - 2000
+                },
+                {
+                    path: "ETH_coinbase -> BTC_coinbase -> USDT_coinbase -> ETH_coinbase",
+                    profit_percentage: 0.0032,
+                    max_volume: 850.0,
+                    confidence: 87,
+                    exchanges: ["coinbase"],
+                    detected_at: Date.now() - 5000
+                },
+                {
+                    path: "BTC_binance -> BTC_kraken",
+                    profit_percentage: 0.0028,
+                    max_volume: 2000.0,
+                    confidence: 91,
+                    exchanges: ["binance", "kraken"],
+                    detected_at: Date.now() - 1000
+                }
+            ];
+
+            return mockOpportunities;
+        }
+
+        // Fallback to mock data if API calls fail
+        setTimeout(() => {
+            if (!window.arbitrageDashboard || !window.arbitrageDashboard.isConnected) {
+                console.log('📊 Using mock data for demonstration');
+                const mockOpps = generateMockOpportunities();
+                window.arbitrageDashboard?.renderOpportunities(mockOpps);
+
+                const mockStats = {
+                    opportunities_found: 127,
+                    messages_processed: 45623,
+                    avg_latency_us: 145.7
+                };
+                window.arbitrageDashboard?.updateStats(mockStats);
+            }
+        }, 3000);
+    </script>
+</body>
+
+</html>

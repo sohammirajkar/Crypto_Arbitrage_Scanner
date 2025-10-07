@@ -1,0 +1,502 @@
+// docker-compose.yml - Complete deployment configuration
+version: '3.8'
+
+services:
+  # C++ Arbitrage Engine
+  arbitrage-cpp:
+    build:
+      context: ./cpp
+      dockerfile: Dockerfile
+      target: production
+    container_name: arbitrage-cpp
+    ports:
+      - "8080:8080"
+      - "9090:9090"  # Metrics endpoint
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs:/var/log/arbitrage
+    environment:
+      - CONFIG_PATH=/app/config/production.yaml
+      - LOG_LEVEL=INFO
+      - THREAD_COUNT=8
+      - ENABLE_THREAD_PINNING=true
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 512M
+        reservations:
+          cpus: '2'
+          memory: 256M
+    restart: unless-stopped
+    depends_on:
+      - timescaledb
+      - redis
+    networks:
+      - arbitrage-net
+
+  # Rust Arbitrage Engine (Alternative implementation)  
+  arbitrage-rust:
+    build:
+      context: ./rust
+      dockerfile: Dockerfile
+      target: production
+    container_name: arbitrage-rust
+    ports:
+      - "8081:8080"
+      - "9091:9090"
+    volumes:
+      - ./config:/app/config:ro  
+      - ./logs:/var/log/arbitrage
+    environment:
+      - RUST_ENV=production
+      - RUST_LOG=info
+      - CONFIG_PATH=/app/config/production.yaml
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 512M
+    restart: unless-stopped
+    depends_on:
+      - timescaledb
+      - redis
+    networks:
+      - arbitrage-net
+    profiles:
+      - rust
+
+  # TimescaleDB for time-series data storage
+  timescaledb:
+    image: timescale/timescaledb:latest-pg14
+    container_name: arbitrage-db
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=arbitrage
+      - POSTGRES_USER=arbitrage_user
+      - POSTGRES_PASSWORD=secure_password_123
+      - TIMESCALEDB_TELEMETRY=off
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - arbitrage-net
+
+  # Redis for caching and pub/sub
+  redis:
+    image: redis:7-alpine
+    container_name: arbitrage-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+    networks:
+      - arbitrage-net
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: arbitrage-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    networks:
+      - arbitrage-net
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: arbitrage-grafana  
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - arbitrage-net
+
+  # Nginx reverse proxy and load balancer
+  nginx:
+    image: nginx:alpine
+    container_name: arbitrage-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./web-dashboard:/usr/share/nginx/html/dashboard:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - arbitrage-cpp
+    networks:
+      - arbitrage-net
+    restart: unless-stopped
+
+  # Log aggregation with Fluentd
+  fluentd:
+    image: fluent/fluentd:v1.14-debian
+    container_name: arbitrage-logs
+    ports:
+      - "24224:24224"
+    volumes:
+      - ./logging/fluent.conf:/fluentd/etc/fluent.conf
+      - ./logs:/var/log/arbitrage
+    networks:
+      - arbitrage-net
+
+volumes:
+  timescale_data:
+  redis_data:  
+  prometheus_data:
+  grafana_data:
+
+networks:
+  arbitrage-net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
+
+---
+
+# Production Configuration (config/production.yaml)
+arbitrage:
+  exchanges:
+    - name: binance
+      websocket_url: "wss://stream.binance.com:9443"
+      symbols: ["btcusdt@ticker", "ethusdt@ticker", "bnbusdt@ticker", "adausdt@ticker"]
+      rate_limit: 1200  # requests per minute
+      
+    - name: coinbase
+      websocket_url: "wss://ws-feed.exchange.coinbase.com"
+      symbols: ["BTC-USD", "ETH-USD", "ADA-USD"]  
+      rate_limit: 1000
+      
+    - name: kraken
+      websocket_url: "wss://ws.kraken.com"
+      symbols: ["XBT/USD", "ETH/USD", "ADA/USD"]
+      rate_limit: 300
+
+  detection:
+    min_profit_threshold: 0.001  # 0.1%
+    max_position_size: 1000.0
+    confidence_threshold: 80
+    max_opportunities_per_second: 100
+    algorithms:
+      - bellman_ford
+      - triangle_arbitrage
+      - cross_exchange
+
+performance:
+  threading:
+    exchange_threads: 3
+    processor_threads: 4
+    detector_threads: 2  
+    pin_threads: true
+    cpu_affinity: [0, 1, 2, 3, 4, 5, 6, 7]
+    
+  memory:
+    tick_queue_size: 65536
+    opportunity_buffer_size: 1000
+    enable_memory_pools: true
+    pool_size: 2048
+    
+  network:
+    websocket_timeout: 30000  # ms
+    reconnect_interval: 5000   # ms  
+    max_reconnect_attempts: 10
+    compression_enabled: true
+    
+monitoring:
+  metrics:
+    enabled: true
+    port: 9090
+    interval: 1000  # ms
+    
+  logging:
+    level: INFO
+    file_path: "/var/log/arbitrage/app.log"
+    max_file_size: 100MB
+    max_files: 10
+    
+  alerting:
+    high_latency_threshold: 1000  # μs
+    error_rate_threshold: 0.01    # 1%
+    missed_opportunities_threshold: 10
+    
+database:
+  host: timescaledb
+  port: 5432
+  name: arbitrage
+  user: arbitrage_user
+  password: secure_password_123
+  pool_size: 10
+  timeout: 30000  # ms
+
+cache:  
+  redis:
+    host: redis
+    port: 6379
+    db: 0
+    ttl: 3600  # seconds
+
+---
+
+# Nginx Configuration (nginx/nginx.conf)
+events {
+    worker_connections 1024;
+}
+
+http {
+    upstream arbitrage_backend {
+        least_conn;
+        server arbitrage-cpp:8080 max_fails=3 fail_timeout=30s;
+        # server arbitrage-rust:8080 backup;  # Failover to Rust implementation
+    }
+    
+    # Rate limiting
+    limit_req_zone $binary_remote_addr zone=api:10m rate=100r/s;
+    limit_req_zone $binary_remote_addr zone=dashboard:10m rate=10r/s;
+    
+    server {
+        listen 80;
+        server_name localhost;
+        
+        # Security headers
+        add_header X-Frame-Options SAMEORIGIN;
+        add_header X-Content-Type-Options nosniff;
+        add_header X-XSS-Protection "1; mode=block";
+        
+        # Gzip compression
+        gzip on;
+        gzip_vary on;
+        gzip_types text/plain text/css application/json application/javascript;
+        
+        # Dashboard
+        location / {
+            root /usr/share/nginx/html/dashboard;
+            index index.html;
+            try_files $uri $uri/ /index.html;
+            
+            limit_req zone=dashboard burst=20 nodelay;
+        }
+        
+        # API endpoints
+        location /api/ {
+            proxy_pass http://arbitrage_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_cache_bypass $http_upgrade;
+            
+            # API rate limiting
+            limit_req zone=api burst=50 nodelay;
+            
+            # CORS headers  
+            add_header Access-Control-Allow-Origin *;
+            add_header Access-Control-Allow-Methods "GET, POST, OPTIONS";
+            add_header Access-Control-Allow-Headers "Content-Type, Authorization";
+        }
+        
+        # WebSocket endpoint
+        location /ws {
+            proxy_pass http://arbitrage_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 86400;
+        }
+        
+        # Metrics endpoint (restricted)
+        location /metrics {
+            proxy_pass http://arbitrage_backend;
+            allow 172.20.0.0/16;  # Only allow internal network
+            deny all;
+        }
+        
+        # Health check
+        location /health {
+            proxy_pass http://arbitrage_backend;
+            access_log off;
+        }
+    }
+}
+
+---
+
+# Database Schema (db/init.sql)
+-- Create extension for TimescaleDB
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+
+-- Market ticks table
+CREATE TABLE market_ticks (
+    time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    exchange VARCHAR(20) NOT NULL,
+    symbol VARCHAR(20) NOT NULL,
+    bid DECIMAL(20,8) NOT NULL,
+    ask DECIMAL(20,8) NOT NULL,
+    volume DECIMAL(20,8) NOT NULL,
+    sequence BIGINT NOT NULL
+);
+
+-- Convert to hypertable for time-series optimization
+SELECT create_hypertable('market_ticks', 'time');
+
+-- Create indexes for fast queries
+CREATE INDEX idx_market_ticks_exchange_symbol_time ON market_ticks(exchange, symbol, time DESC);
+CREATE INDEX idx_market_ticks_time ON market_ticks(time DESC);
+
+-- Arbitrage opportunities table  
+CREATE TABLE arbitrage_opportunities (
+    time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    path TEXT NOT NULL,
+    profit_percentage DECIMAL(10,6) NOT NULL,
+    max_volume DECIMAL(20,2) NOT NULL,
+    confidence INTEGER NOT NULL,
+    exchanges TEXT[] NOT NULL,
+    duration_ms INTEGER
+);
+
+SELECT create_hypertable('arbitrage_opportunities', 'time');
+
+-- Performance metrics table
+CREATE TABLE performance_metrics (
+    time TIMESTAMPTZ NOT NULL DEFAULT NOW(),  
+    metric_name VARCHAR(50) NOT NULL,
+    value DECIMAL(20,6) NOT NULL,
+    instance VARCHAR(50) NOT NULL
+);
+
+SELECT create_hypertable('performance_metrics', 'time');
+
+-- Create retention policies (keep data for 30 days)
+SELECT add_retention_policy('market_ticks', INTERVAL '30 days');
+SELECT add_retention_policy('arbitrage_opportunities', INTERVAL '90 days');  
+SELECT add_retention_policy('performance_metrics', INTERVAL '30 days');
+
+-- Create continuous aggregates for faster queries
+CREATE MATERIALIZED VIEW hourly_arbitrage_stats
+WITH (timescaledb.continuous) AS
+SELECT 
+    time_bucket(INTERVAL '1 hour', time) AS bucket,
+    COUNT(*) as opportunity_count,
+    AVG(profit_percentage) as avg_profit,
+    MAX(profit_percentage) as max_profit,
+    AVG(confidence) as avg_confidence
+FROM arbitrage_opportunities
+GROUP BY bucket;
+
+-- Refresh policy for materialized view
+SELECT add_continuous_aggregate_policy('hourly_arbitrage_stats',
+    start_offset => INTERVAL '2 hours',
+    end_offset => INTERVAL '1 hour', 
+    schedule_interval => INTERVAL '1 hour');
+
+---
+
+# Deployment Commands
+
+# 1. Start the full stack
+docker-compose up -d
+
+# 2. Start only C++ version  
+docker-compose up -d arbitrage-cpp timescaledb redis prometheus grafana nginx
+
+# 3. Start Rust version instead
+docker-compose --profile rust up -d arbitrage-rust timescaledb redis
+
+# 4. Scale for high load
+docker-compose up -d --scale arbitrage-cpp=3 --scale nginx=2
+
+# 5. Monitor performance
+docker-compose exec arbitrage-cpp htop
+docker-compose logs -f arbitrage-cpp
+
+# 6. Check system health
+curl http://localhost/health
+curl http://localhost/api/stats
+
+# 7. Access dashboards
+# Main Dashboard: http://localhost
+# Grafana: http://localhost:3000 (admin/admin123)  
+# Prometheus: http://localhost:9090
+
+# 8. Production deployment with SSL
+# Replace nginx.conf with SSL config and add certificates to ./ssl/
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+---
+
+# Performance Testing Scripts
+
+#!/bin/bash
+# load_test.sh - Simulate high-frequency market data
+
+echo "🚀 Starting load test for arbitrage scanner..."
+
+# Start background processes to simulate exchange data
+for i in {1..10}; do
+    (
+        while true; do
+            # Simulate price updates via WebSocket
+            curl -X POST http://localhost/api/price-update \
+                -H "Content-Type: application/json" \
+                -d "{
+                    \"exchange\": \"binance\",
+                    \"symbol\": \"BTC/USDT\",
+                    \"bid\": $(echo "50000 + $RANDOM/100" | bc -l),
+                    \"ask\": $(echo "50001 + $RANDOM/100" | bc -l),
+                    \"volume\": $(echo "$RANDOM")
+                }" &
+            sleep 0.001  # 1000 requests per second
+        done
+    ) &
+done
+
+# Monitor performance during load test  
+echo "⏱️  Monitoring latency and throughput..."
+while true; do
+    latency=$(curl -s http://localhost/api/stats | jq '.avg_latency_us')
+    throughput=$(curl -s http://localhost/api/stats | jq '.messages_processed')
+    opportunities=$(curl -s http://localhost/api/stats | jq '.opportunities_found')
+    
+    echo "$(date): Latency: ${latency}μs, Throughput: ${throughput}/s, Opportunities: ${opportunities}"
+    sleep 5
+done
+
+# Cleanup
+trap 'kill $(jobs -p)' EXIT
