@@ -1,0 +1,16 @@
+{
+  "name": "exported-assets",
+  "version": "1.0.0",
+  "description": "A high-performance arbitrage detection system built with C++ and Rust, demonstrating HFT expertise in multithreading and low-latency design.",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}

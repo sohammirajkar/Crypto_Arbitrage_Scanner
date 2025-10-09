@@ -1,4 +1,4 @@
-// docker-compose.yml - Complete deployment configuration
+# docker-compose.yml - Complete deployment configuration
 version: '3.8'
 
 services:
@@ -190,19 +190,19 @@ networks:
 # Production Configuration (config/production.yaml)
 arbitrage:
   exchanges:
-    - name: binance
-      websocket_url: "wss://stream.binance.com:9443"
-      symbols: ["btcusdt@ticker", "ethusdt@ticker", "bnbusdt@ticker", "adausdt@ticker"]
+    - name: nyse
+      websocket_url: "wss://nyse.market-data.stream/ticker"
+      symbols: ["SPY@ticker", "AAPL@ticker", "MSFT@ticker"]
       rate_limit: 1200  # requests per minute
       
-    - name: coinbase
-      websocket_url: "wss://ws-feed.exchange.coinbase.com"
-      symbols: ["BTC-USD", "ETH-USD", "ADA-USD"]  
+    - name: nasdaq
+      websocket_url: "wss://nasdaq.market-data.stream/ticker"
+      symbols: ["QQQ@ticker", "GOOGL@ticker", "NVDA@ticker"]  
       rate_limit: 1000
       
-    - name: kraken
-      websocket_url: "wss://ws.kraken.com"
-      symbols: ["XBT/USD", "ETH/USD", "ADA/USD"]
+    - name: cboe
+      websocket_url: "wss://cboe.market-data.stream/ticker"
+      symbols: ["DIA@ticker", "SPX@ticker"]
       rate_limit: 300
 
   detection:

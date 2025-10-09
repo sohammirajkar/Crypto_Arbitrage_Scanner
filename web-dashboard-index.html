@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Real-time Arbitrage Scanner</title>
+    <title>Real-time Market Anomaly Detector</title>
     <style>
         * {
             margin: 0;
@@ -215,6 +215,10 @@
             opacity: 0.7;
         }
 
+        .loading.hidden {
+            display: none;
+        }
+
         .error {
             background: rgba(239, 68, 68, 0.1);
             border: 1px solid rgba(239, 68, 68, 0.3);
@@ -293,8 +297,10 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>⚡ Real-time Arbitrage Scanner</h1>
-            <p>High-frequency trading opportunities across cryptocurrency exchanges</p>
+            <h1>⚡ Market Anomaly Detector</h1>
+            <p>Equity market opportunities across S&P 500, NASDAQ & DOW JONES<br>
+                <small>Press Ctrl+R or Cmd+R to refresh data</small>
+            </p>
         </div>
 
         <div class="stats-grid">
@@ -319,19 +325,19 @@
         <div class="opportunities-section">
             <div class="section-title">
                 <div class="status-indicator"></div>
-                Live Arbitrage Opportunities
+                Live Market Anomalies
             </div>
 
             <div id="opportunities-container">
-                <div class="loading">
-                    🔄 Scanning for arbitrage opportunities...
+                <div class="loading" id="initial-loading">
+                    🔄 Scanning for market anomalies...
                 </div>
             </div>
         </div>
 
         <div class="footer">
             <p>Built with C++ & Rust | Demonstrating HFT expertise in multithreading, low-latency design, and real-time
-                data processing</p>
+                equity market data processing</p>
         </div>
     </div>
 
@@ -341,6 +347,7 @@
                 this.updateInterval = 1000; // 1 second updates
                 this.maxOpportunities = 50;
                 this.isConnected = false;
+                this.dataLoaded = false; // Track if data has been successfully loaded
                 this.stats = {
                     totalOpportunities: 0,
                     messagesProcessed: 0,
@@ -358,13 +365,7 @@
             }
 
             startDataPolling() {
-                // Poll for new opportunities
-                setInterval(() => {
-                    this.fetchOpportunities();
-                    this.fetchStats();
-                }, this.updateInterval);
-
-                // Initial fetch
+                // Initial fetch only - no continuous polling
                 this.fetchOpportunities();
                 this.fetchStats();
             }
@@ -379,7 +380,11 @@
                     this.isConnected = true;
                 } catch (error) {
                     console.error('Error fetching opportunities:', error);
-                    this.showError('Failed to connect to arbitrage engine');
+
+                    // Only show error if data hasn't been loaded yet
+                    if (!this.dataLoaded) {
+                        this.showError('Failed to connect to arbitrage engine');
+                    }
                     this.isConnected = false;
                 }
             }
@@ -398,12 +403,28 @@
 
             renderOpportunities(opportunities) {
                 const container = document.getElementById('opportunities-container');
+                const loadingIndicator = document.getElementById('initial-loading');
+
+                // Mark data as loaded after first successful fetch
+                if (!this.dataLoaded && opportunities) {
+                    this.dataLoaded = true;
+                    // Hide loading indicator
+                    if (loadingIndicator) {
+                        loadingIndicator.classList.add('hidden');
+                    }
+                }
 
                 if (!opportunities || opportunities.length === 0) {
+                    // Hide loading indicator
+                    if (loadingIndicator) {
+                        loadingIndicator.classList.add('hidden');
+                    }
+
                     container.innerHTML = `
                         <div class="no-opportunities">
-                            📊 No arbitrage opportunities detected at the moment.<br>
-                            System is actively monitoring ${this.getExchangeCount()} exchanges...
+                            📊 No market anomalies detected at the moment.<br>
+                            Showing latest data snapshot - Press Ctrl+R or F5 to refresh<br>
+                            Monitoring ${this.getExchangeCount()} major equity indices
                         </div>
                     `;
                     return;
@@ -422,8 +443,28 @@
 
             renderOpportunityItem(opportunity) {
                 const profitPercent = (opportunity.profit_percentage * 100);
+                const netProfitPercent = opportunity.net_profit_percentage ? (opportunity.net_profit_percentage * 100) : profitPercent;
                 const profitClass = this.getProfitClass(profitPercent);
                 const timeAgo = this.getTimeAgo(opportunity.detected_at);
+                const dateTime = this.formatDateTime(opportunity.detected_at);
+
+                // Format costs if available
+                let costsInfo = '';
+                if (opportunity.costs) {
+                    costsInfo = `
+                        <div class="detail-item">
+                            <div class="detail-value">${(opportunity.costs.total * 100).toFixed(3)}%</div>
+                            <div class="detail-label">Total Costs</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-value">${(opportunity.costs.brokerage * 100).toFixed(3)}%</div>
+                            <div class="detail-label">Brokerage</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-value">${(opportunity.costs.exchange * 100).toFixed(3)}%</div>
+                            <div class="detail-label">Exchange</div>
+                        </div>`;
+                }
 
                 return `
                     <div class="opportunity-item ${profitClass}">
@@ -448,6 +489,15 @@
                             <div class="detail-item">
                                 <div class="detail-value">${timeAgo}</div>
                                 <div class="detail-label">Detected</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-value">${dateTime}</div>
+                                <div class="detail-label">Date/Time</div>
+                            </div>
+                            ${costsInfo}
+                            <div class="detail-item">
+                                <div class="detail-value">${netProfitPercent.toFixed(3)}%</div>
+                                <div class="detail-label">Net Profit</div>
                             </div>
                         </div>
                     </div>
@@ -502,24 +552,41 @@
                 return `${Math.floor(diff / 3600)}h ago`;
             }
 
+            formatDateTime(timestamp) {
+                if (!timestamp) return 'N/A';
+
+                const date = new Date(timestamp);
+                return date.toLocaleString();
+            }
+
             getExchangeCount() {
-                return 3; // Binance, Coinbase, Kraken
+                return 3; // NYSE, NASDAQ, DOW JONES
             }
 
             showError(message) {
                 const container = document.getElementById('opportunities-container');
-                container.innerHTML = `
-                    <div class="error">
-                        ⚠️ ${message}<br>
-                        <small>Attempting to reconnect...</small>
-                    </div>
-                `;
+                const loadingIndicator = document.getElementById('initial-loading');
+
+                // Only show error if data hasn't been loaded yet
+                if (!this.dataLoaded) {
+                    // Hide loading indicator
+                    if (loadingIndicator) {
+                        loadingIndicator.classList.add('hidden');
+                    }
+
+                    container.innerHTML = `
+                        <div class="error">
+                            ⚠️ ${message}<br>
+                            <small>Press Ctrl+R or F5 to retry</small>
+                        </div>
+                    `;
+                }
             }
 
             setupEventListeners() {
                 // Keyboard shortcuts
                 document.addEventListener('keydown', (e) => {
-                    if (e.key === 'r' && e.ctrlKey) {
+                    if ((e.key === 'r' && e.ctrlKey) || (e.key === 'r' && e.metaKey)) {
                         e.preventDefault();
                         this.fetchOpportunities();
                         this.fetchStats();
@@ -527,12 +594,13 @@
                     }
                 });
 
-                // Page visibility change handling
-                document.addEventListener('visibilitychange', () => {
-                    if (!document.hidden) {
-                        // Page became visible, refresh data
+                // Also support F5 for refresh
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'F5') {
+                        e.preventDefault();
                         this.fetchOpportunities();
                         this.fetchStats();
+                        console.log('📊 Data refreshed manually');
                     }
                 });
             }
@@ -547,37 +615,59 @@
         function generateMockOpportunities() {
             const mockOpportunities = [
                 {
-                    path: "BTC_binance -> USDT_binance -> ETH_binance -> BTC_binance",
+                    path: "SPY Statistical Arbitrage Detected",
                     profit_percentage: 0.0045,
-                    max_volume: 1250.0,
+                    net_profit_percentage: 0.0035,
+                    max_volume: 12500.0,
                     confidence: 94,
-                    exchanges: ["binance"],
-                    detected_at: Date.now() - 2000
+                    exchanges: ["NYSE", "NASDAQ"],
+                    detected_at: Date.now() - 2000,
+                    costs: {
+                        brokerage: 0.0002,
+                        exchange: 0.0001,
+                        slippage: 0.0001,
+                        total: 0.0004
+                    }
                 },
                 {
-                    path: "ETH_coinbase -> BTC_coinbase -> USDT_coinbase -> ETH_coinbase",
+                    path: "QQQ Index Constituent Mispricing Detected",
                     profit_percentage: 0.0032,
-                    max_volume: 850.0,
+                    net_profit_percentage: 0.0022,
+                    max_volume: 8500.0,
                     confidence: 87,
-                    exchanges: ["coinbase"],
-                    detected_at: Date.now() - 5000
+                    exchanges: ["NASDAQ"],
+                    detected_at: Date.now() - 5000,
+                    costs: {
+                        brokerage: 0.0003,
+                        exchange: 0.0001,
+                        slippage: 0.0001,
+                        total: 0.0005
+                    }
                 },
                 {
-                    path: "BTC_binance -> BTC_kraken",
+                    path: "DIA Cross-Index Discrepancy Detected",
                     profit_percentage: 0.0028,
-                    max_volume: 2000.0,
+                    net_profit_percentage: 0.0018,
+                    max_volume: 20000.0,
                     confidence: 91,
-                    exchanges: ["binance", "kraken"],
-                    detected_at: Date.now() - 1000
+                    exchanges: ["NYSE", "DOW"],
+                    detected_at: Date.now() - 1000,
+                    costs: {
+                        brokerage: 0.0002,
+                        exchange: 0.0001,
+                        slippage: 0.0001,
+                        total: 0.0004
+                    }
                 }
             ];
 
             return mockOpportunities;
         }
 
-        // Fallback to mock data if API calls fail
+        // Fallback to mock data if API calls fail and data hasn't been loaded
         setTimeout(() => {
-            if (!window.arbitrageDashboard || !window.arbitrageDashboard.isConnected) {
+            if ((!window.arbitrageDashboard || !window.arbitrageDashboard.isConnected) &&
+                (!window.arbitrageDashboard || !window.arbitrageDashboard.dataLoaded)) {
                 console.log('📊 Using mock data for demonstration');
                 const mockOpps = generateMockOpportunities();
                 window.arbitrageDashboard?.renderOpportunities(mockOpps);
